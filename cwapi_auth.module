@@ -1,0 +1,689 @@
+<?php
+/**
+ * @file
+ * Provides authentication integration with the Cambey & West API.
+ */
+
+/**
+ * Implements hook_help().
+ */
+function cwapi_auth_help($path, $arg) {
+  if ($path == 'admin/help#cwapi_auth') {
+    return t('The Cambey & West Authentication module provides authentication integration with the Cambey & West web service.<p><p>');
+  }
+}
+
+/**
+ * Implements hook_permission().
+ *
+ * Since the access to our new custom pages will be granted based on
+ * special permissions, we need to define what those permissions are here.
+ * This ensures that they are available to enable on the user role
+ * administration pages.
+ */
+function cwapi_auth_permission() {
+  return array(
+    'administer cw authentication' => array(
+      'title' => t('Administer Cambey & West Authentication'),
+      'description' => t('Allow admins to administer the Cambey & West Authentication module.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function cwapi_auth_menu() {
+  // users
+  $items['admin/config/people/cwauth'] = array(
+    'title' => 'C&W Authentication',
+    'description' => 'Settings for the Cambey & West user authentication module.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('cwapi_auth_settings'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_menu_alter().
+ * Remember to clear the menu cache after adding/editing this function.
+ */
+function cwapi_auth_menu_alter(&$items) {
+  // Removing user login tabs - note the pages themselves are still available to link to
+
+  // Set these tabs to MENU_CALLBACK, so they still register the path, but just don't show the tab:
+  $items['user']['type'] = MENU_CALLBACK;
+  $items['user/password']['type'] = MENU_CALLBACK;
+  $items['user/register']['type'] = MENU_CALLBACK;
+
+}
+
+
+/**
+ * Admin settings form
+ */
+function cwapi_auth_settings() {
+  $form = array();
+
+  // Pub Acronym
+  $form['cwapi_auth_pub_acronym'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Pub Acronym'),
+    '#default_value' => variable_get('cwapi_auth_pub_acronym', ''),
+    '#description' => t('The three digit identifier for your C&W publishing account.'),
+    '#required' => TRUE,
+  );
+
+  // Client ID
+  $form['cwapi_auth_client_id'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Authorized User'),
+    '#default_value' => variable_get('cwapi_auth_client_id', ''),
+    '#description' => t('The authorized API username for the Cambey & West web service.'),
+    '#required' => TRUE,
+  );
+
+  // Client Password
+  $form['cwapi_auth_client_pass'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Authorized User Password'),
+    '#default_value' => variable_get('cwapi_auth_client_pass', ''),
+    '#description' => t('The authorized API password for the service.'),
+    '#required' => TRUE,
+  );
+
+  // Members only, or not
+  $form['cwapi_auth_members_only'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Only allow Cambey & West members to log in'),
+    '#default_value' => variable_get('cwapi_auth_members_only', 0),
+    '#description' => t('With this option selected, only active member users of the Cambey & West system will be able to login. Inactive members, non-members, and users that only exist locally, will not be able to log in. (Note: An exception is made for User 1 so that this site can still be administered.)'),
+  );
+
+  // Non-member login failure message
+  $form['cwapi_auth_non_member_msg'] = array(
+    '#type' => 'textarea',
+    '#title' => t('User message due to non-subscriber login attempt'),
+    '#rows' => 2,
+    '#default_value' => variable_get('cwapi_auth_non_member_msg','Your account information was not found. Please try again or click here to start a subscription.'),
+    '#description' => t('The message to give to users who are not in the subscription system. If blank, the user will receive no information other than normal login failure.' ),
+  );
+
+
+  // Get all roles other than Anonymous and Authenticated
+  $roles = user_roles();
+  unset( $roles[1] );
+  unset( $roles[2] );
+
+  // Add a NULL option to allow deselection of role.
+  $options = array( NULL => '--' . t('Select') . '--' );
+  foreach ( $roles as $key => $value ) {
+    $options[$key] = $value;
+  }
+
+  // Active role assignment
+  $form['cwapi_auth_members_role'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#title' => t('User role to assign to actively subscribed users'),
+    '#default_value' => variable_get('cwapi_auth_members_role', 0),
+    '#description' => t('Choose which role to assign to subscribed users on successful login.'),
+  );
+
+  // Suspended role assignment
+  $form['cwapi_auth_suspended_role'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#title' => t('User role to assign to suspended users'),
+    '#default_value' => variable_get('cwapi_auth_suspended_role', 0),
+    '#description' => t('Choose which role to assign to suspended users on login.'),
+  );
+
+  // Inactive role assignment
+  $form['cwapi_auth_inactive_role'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#title' => t('User role to assign to inactive users'),
+    '#default_value' => variable_get('cwapi_auth_inactive_role', 0),
+    '#description' => t('Choose which role to assign to inactive users.'),
+  );
+
+  // Cancelled role assignment
+  $form['cwapi_auth_cancelled_role'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#title' => t('User role to assign to cancelled users'),
+    '#default_value' => variable_get('cwapi_auth_cancelled_role', 0),
+    '#description' => t('Choose which role to assign to cancelled users.'),
+  );
+
+  return system_settings_form($form);
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function cwapi_auth_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+    case 'user_pass':
+      $form['#attributes']['autocomplete'] = 'off';
+      // $form['actions']['submit']['#value'] = t('Reset Your Password');
+
+      break;
+    case 'user_login':
+      drupal_set_title(t(''));
+      $form['#validate'] = array(
+        'user_login_name_validate',
+        'cwapi_auth_login_validate',
+        'cwapi_auth_final_validate'
+      );
+      break;
+    case 'user_login_block':
+      $form['#validate'] = array(
+        'user_login_name_validate',
+        'cwapi_auth_login_validate',
+        'cwapi_auth_final_validate'
+      );
+      break;
+    default:
+      break;
+  }
+}
+
+/**
+ * Login form validation callback.
+ */
+function cwapi_auth_login_validate($form, &$form_state) {
+
+  $username = $form_state['values']['name'];
+  $password = $form_state['values']['pass'];
+
+  if ( _cwapi_auth_log_in_user_1( $username, $password ) ) {
+    $form_state['uid'] = 1;
+    return;
+  }
+
+  $result_xml =
+    _cwapi_auth_authenticate_against_cambey_west( $username, $password );
+    
+  $cwapi_auth_result = preg_replace('#&(?=[a-z_0-9]+=)#', '&amp;', $result_xml);
+
+ if (isset($cwapi_auth_result)) {
+  
+  $resxml = new SimpleXMLElement($cwapi_auth_result);
+  
+  if (isset($resxml)) {
+   $res = $resxml->xpath('/SubscriberDataRoot/SubscriberData/result');
+   foreach($res as $results) {
+    $result = $results;
+   }
+   $stat = $resxml->xpath('/SubscriberDataRoot/SubscriberData/curr_status');
+    foreach($stat as $stats) {
+    $status = $stats;
+   }
+   $acc = $resxml->xpath('/SubscriberDataRoot/SubscriberData/acctno');
+    foreach($acc as $accs) {
+    $acctno = $accs;
+   }
+   $fname = $resxml->xpath('/SubscriberDataRoot/SubscriberData/f_name');
+    foreach($fname as $fnames) {
+    $f_name = $fnames;
+   }
+   $lname = $resxml->xpath('/SubscriberDataRoot/SubscriberData/l_name');
+    foreach($lname as $lnames) {
+    $l_name = $lnames;
+   }
+   $lcom = $resxml->xpath('/SubscriberDataRoot/SubscriberData/company');
+    foreach($lcom as $lcoms) {
+    $company = $lcoms;
+   }
+   $ltit = $resxml->xpath('/SubscriberDataRoot/SubscriberData/title');
+    foreach($ltit as $ltits) {
+    $title = $ltits;
+   }
+   $phn = $resxml->xpath('/SubscriberDataRoot/SubscriberData/phone');
+    foreach($phn as $phns) {
+    $phone = $phns;
+   }
+   $lstr = $resxml->xpath('/SubscriberDataRoot/SubscriberData/street');
+    foreach($lstr as $lstrs) {
+    $street = $lstrs;
+   }
+   $lcity = $resxml->xpath('/SubscriberDataRoot/SubscriberData/city');
+    foreach($lcity as $lcitys) {
+    $city = $lcitys;
+   }
+   $lstate = $resxml->xpath('/SubscriberDataRoot/SubscriberData/state');
+    foreach($lstate as $lstates) {
+    $state = $lstates;
+   }
+   $lco = $resxml->xpath('/SubscriberDataRoot/SubscriberData/country');
+    foreach($lco as $lcos) {
+    $country = $lcos;
+   }
+   $lzip = $resxml->xpath('/SubscriberDataRoot/SubscriberData/zip');
+    foreach($lzip as $lzips) {
+    $zip = $lzips;
+   }
+   $lexp = $resxml->xpath('/SubscriberDataRoot/SubscriberData/yiexpire');
+    foreach($lexp as $lexps) {
+    $yiexpire = strtotime($lexps);
+   }
+   $amsg = $resxml->xpath('/SubscriberDataRoot/SubscriberData/frienderrormsg');
+    foreach($amsg as $amsgs) {
+    $errormsg = $amsgs;
+   }
+   $bmsg = $resxml->xpath('/SubscriberDataRoot/SubscriberData/friendcorrectiveaction');
+    foreach($bmsg as $bmsgs) {
+    $corrective = $bmsgs;
+   }
+   $eurl = $resxml->xpath('/SubscriberDataRoot/SubscriberData/friendhttp');
+    foreach($eurl as $eurls) {
+    $errorurl = $eurls;
+   }
+  }
+ }
+  $is_members_only_site = variable_get( 'cwapi_auth_members_only', FALSE );
+
+  $is_cw_authenticated = $result == 'True';
+
+  $is_active_member = $status == 'A';
+
+  $is_inactive_member = $status == 'L';
+
+  $is_suspended_member = $status == 'S';
+
+  $is_cancelled_member = $status == 'C';
+  
+  $the_pub_code = variable_get('cwapi_auth_pub_acronym', 'TTP');
+  
+  $subscribe_url = 'https://www.cambeywest.com/subscribe2/?p=' .$the_pub_code. '&amp;f=paid';
+  
+  $non_subscriber_msg = variable_get('cwapi_auth_non_member_msg','Your account information was not found. Please try again or click here to start a subscription.');
+  
+
+  $uid = _cwapi_auth_log_in_user( $username, $password, $status, $acctno, $f_name, $l_name, $company, $title, $phone, $street, $city, $state, $country, $zip, $yiexpire, $errormsg, $corrective, $errorurl, $is_cw_authenticated );
+  if ( $uid ) {
+    $form_state['uid'] = $uid;
+    _cwapi_auth_manage_members_role( $uid, $is_active_member, $is_suspended_member, $is_inactive_member, $is_cancelled_member );
+  }
+  else {
+   // print $is_cw_authenticated;
+    $query = isset($form_state['input']['name']) ? array('name' => $form_state['input']['name']) : array();
+      form_set_error('e', t('<h5><a href="@password" target="_blank">'. $non_subscriber_msg .'</a></h5>', array('@password' => url($subscribe_url, array('query' => $query)))));
+      watchdog('user', 'Login attempt failed for %user.', array('%user' => $form_state['values']['name']));
+  }
+}
+
+function cwapi_auth_final_validate($form, &$form_state) {
+
+  if (empty($form_state['uid'])) {
+    // Always register an IP-based failed login event.
+    flood_register_event('failed_login_attempt_ip', variable_get('user_failed_login_ip_window', 3600));
+    // Register a per-user failed login event.
+    if (isset($form_state['flood_control_user_identifier'])) {
+      flood_register_event('failed_login_attempt_user', variable_get('user_failed_login_user_window', 21600), $form_state['flood_control_user_identifier']);
+    }
+
+    if (isset($form_state['flood_control_triggered'])) {
+      if ($form_state['flood_control_triggered'] == 'user') {
+        form_set_error('name', format_plural(variable_get('user_failed_login_user_limit', 5), 'Sorry, there has been more than one failed login attempt for this account. It is temporarily blocked. Try again later or <a href="@url">request a new password</a>.', 'Sorry, there have been more than @count failed login attempts for this account. It is temporarily blocked. Try again later or <a href="@url">request a new password</a>.', array('@url' => url('user/password'))));
+      }
+      else {
+        // We did not find a uid, so the limit is IP-based.
+        form_set_error('name', t('Sorry, too many failed login attempts from your IP address. This IP address is temporarily blocked. Try again later or <a href="@url">request a new password</a>.', array('@url' => url('user/password'))));
+      }
+    }
+    else {
+      // Use $form_state['input']['name'] here to guarantee that we send
+      // exactly what the user typed in. $form_state['values']['name'] may have
+      // been modified by validation handlers that ran earlier than this one.
+     // $query = isset($form_state['input']['name']) ? array('name' => $form_state['input']['name']) : array();
+     // form_set_error('e', t('<h5><a href="@password">'. $non_subscriber_msg .'</a></h5>', array('@password' => url($subscribe_url, array('query' => $query)))));
+     // watchdog('user', 'Login attempt failed for %user.', array('%user' => $form_state['values']['name']));
+    }
+  }
+  elseif (isset($form_state['flood_control_user_identifier'])) {
+    // Clear past failures for this user so as not to block a user who might
+    // log in and out more than once in an hour.
+    flood_clear_event('failed_login_attempt_user', $form_state['flood_control_user_identifier']);
+  }
+}
+
+/**
+ * Report log
+
+ /**
+  * Log in user 1 if possible.
+  *
+  * @return
+  *   1 on successful authentication, else FALSE.
+ */
+function _cwapi_auth_log_in_user_1( $username, $password ) {
+
+  $account = module_invoke( 'user', 'load_by_name', $username );
+
+  // Does the given login name have admin role?
+
+  if ( $account  &&  isset($account->roles[3])) {
+
+    $uid = module_invoke( 'user', 'authenticate', $username, $password );
+    return $uid;
+  }
+
+  return FALSE;
+}
+
+/**
+ * Authenticate against Cambey & West
+ *
+ * @return
+ *   The result object from the authentication check, or NULL on error.
+ */
+function _cwapi_auth_authenticate_against_cambey_west( $username, $password ) {
+
+  $opts = array(
+    'ssl' => array('ciphers'=>'RC4-SHA', 'verify_peer'=>false, 'verify_peer_name'=>false)
+  );
+
+  //Get needed variables
+  $auth_url = 'https://www.cambeywest.com/api_test/service.asmx?wsdl';
+  $client_id = variable_get('cwapi_auth_client_id', '');
+  $client_pass = variable_get('cwapi_auth_client_pass', '');
+  $pub_acronym = variable_get('cwapi_auth_pub_acronym', '');
+
+  $args = array();
+  $args['subscriber_email'] = trim($username);
+  $args['subscriber_pass'] = trim($password);
+  $args['pub_acronym'] = trim($pub_acronym);
+  $args['auth_user'] = trim($client_id);
+  $args['auth_pass'] = trim($client_pass);
+
+  // Try to authenticate user against Cambey & West.
+  try {
+    $client = new SoapClient( $auth_url );
+    $response = $client->GetSubscriberData( $args );
+    $result = $response->GetSubscriberDataResult;
+    $enc_result = decode_entities($result);
+    return $enc_result;
+
+  }
+  catch ( Exception $e ) {
+    drupal_set_message(
+      'SOAP error: ' . check_plain( $e->getMessage() ), 'error' );
+    watchdog( 'cwapi_auth', 'SOAP error: @msg',
+      array( '@msg' => $e->getMessage() ), WATCHDOG_ERROR );
+    return NULL;
+  }
+}
+
+/**
+ * Tell the user why they failed to log in to this members only site.
+ *
+ * @param $is_cw_authenticated
+ *   TRUE if user was authenticated against Cambey & West, else FALSE.
+ */
+function _cwapi_auth_report_non_member_login_failure( $is_cw_authenticated ) {
+
+  if ( $is_cw_authenticated ) {
+
+    $msg = variable_get( 'cwapi_auth_non_member_msg', '' );
+    if ( !empty( $msg ) ) {
+      drupal_set_message( check_plain( $msg ), 'error' );
+    }
+  }
+  else {
+    $the_pub_code = variable_get('cwapi_auth_pub_acronym', 'TTP');
+    $subscribe_url = 'https://www.cambeywest.com/subscribe2/?p=' .$the_pub_code. '&amp;f=paid';
+    $non_subscriber_msg = variable_get('cwapi_auth_non_member_msg','Your account information was not found. Please try again or click here to start a subscription.');
+
+    $msg = l($non_subscriber_msg, $subscribe_url,  array('external' => TRUE));
+    drupal_set_message( check_plain( $msg ), 'error' );
+    watchdog( 'cwapi_auth', 'authentication error', array(), WATCHDOG_NOTICE );
+  }
+
+  return;
+}
+
+/**
+ * Log user in to Drupal.
+ *
+ * If authentication succeeded against Cambey & West then a local user may
+ * be created or updated in order to facilitate the login.
+ *
+ * @param $is_cw_authenticated
+ *   TRUE if user authenticated against Cambey & West, else FALSE.
+ *
+ * @return
+ *   The user ID (uid) if the user was logged in, else FALSE.
+ */
+function _cwapi_auth_log_in_user( $username, $password, $status, $acctno, $f_name, $l_name, $company, $title, $phone, $street, $city, $state, $country, $zip, $yiexpire, $errormsg, $corrective, $errorurl, $is_cw_authenticated ) {
+
+  $success_message = t('Authentication success');
+
+  // Try a standard login first
+  $uid = module_invoke( 'user', 'authenticate', $username, $password );
+  if ( $uid ) {
+    return $uid;
+  }
+
+  // Local login failed. Was user NOT authenticated by Cambey & West?
+  if ( ! $is_cw_authenticated ) {
+    return FALSE;
+  }
+
+  $account = module_invoke( 'user', 'load_by_name', $username );
+
+  // Does this user already exist on the local Drupal system?
+  if ( $account ) {
+
+      // Overwrite local password with Cambey & West password.
+      $user_info = array( 'pass' => $password );
+      $account = user_save( $account, $user_info );
+
+      // Did saving the new password succeed?
+      if ( $account ) {
+        watchdog( 'cwapi_auth', 'Changed password for user: @name',
+          array( '@name' => $username ), WATCHDOG_NOTICE );
+       // drupal_set_message( $success_message );
+
+        return $account->uid;
+      }
+      else {
+        watchdog( 'cwapi_auth', 'Failed to change password for user: @name',
+          array( '@name' => $username ), WATCHDOG_ERROR );
+        return FALSE;
+      }
+
+  }
+  else {
+
+
+    // User does not exist locally: Try to create new Drupal user.
+    $userinfo = array(
+      'name' => $username,
+      'pass' => $password,
+      'mail' => $username,
+      'init' => $username,
+      'status' => 1,
+      'field_account_status' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $status
+          )
+        )
+      ),
+      'field_account_number' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $acctno
+          )
+        )
+      ),
+      'field_first_name' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $f_name
+          )
+        )
+      ),
+      'field_last_name' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $l_name
+          )
+        )
+      ),
+      'field_user_company' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $company
+          )
+        )
+      ),
+      'field_user_title' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $title
+          )
+        )
+      ),
+      'field_user_phone' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $phone
+          )
+        )
+      ),
+      'field_user_street' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $street
+          )
+        )
+      ),
+      'field_user_city' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $city
+          )
+        )
+      ),
+      'field_user_state' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $state
+          )
+        )
+      ),
+      'field_user_country' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $country
+          )
+        )
+      ),
+      'field_user_zip' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $zip
+          )
+        )
+      ),
+      'field_account_expires' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $yiexpire
+          )
+        )
+      ),
+      'field_account_message' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $errormsg
+          )
+        )
+      ),
+      'field_account_action' => array(
+        LANGUAGE_NONE => array(
+          0 => array(
+            'value' => $corrective
+          )
+        )
+      ),
+      'field_account_url' => array(
+      LANGUAGE_NONE => array(
+        0 => array(
+          'value' => $errorurl
+        )
+      )
+    )
+    );
+    $account = user_save('', $userinfo);
+
+    // Was user account creation successful?
+    if ( $account ) {
+      watchdog( 'cwapi_auth', 'New user @name created from CW.',
+        array( '@name' => $username ), WATCHDOG_NOTICE );
+      //drupal_set_message( $success_message );
+
+      return $account->uid;
+    }
+    else {
+      watchdog( 'cwapi_auth', 'Failed to create user from details: @info',
+        array( '@info' => serialize($userinfo) ), WATCHDOG_ERROR );
+      return FALSE;
+    }
+  }
+}
+
+/**
+ * Add or remove any member role from the given user.
+ *
+ * @param $uid
+ *   The ID of the given user.
+ * @param $is_active_member
+ *   Whether the user is an active Cambey & West member.
+ */
+function _cwapi_auth_manage_members_role( $uid, $is_active_member, $is_suspended_member, $is_inactive_member, $is_cancelled_member ) {
+
+  $members_role = variable_get( 'cwapi_auth_members_role', NULL );
+  $suspended_role = variable_get( 'cwapi_auth_suspended_role', NULL );
+  $inactive_role = variable_get( 'cwapi_auth_inactive_role', NULL );
+  $cancelled_role = variable_get( 'cwapi_auth_cancelled_role', NULL );
+
+  if ( $members_role ) {
+
+    $account = module_invoke('user', 'load', $uid);
+
+    if ( $is_active_member  &&  ! isset( $account->roles[$members_role] ) ) {
+      $roles = user_roles();
+      $account->roles[$members_role] = $roles[$members_role];
+      $account = module_invoke('user', 'save', $account);
+    }
+    elseif ( $is_suspended_member  &&  ! isset( $account->roles[$suspended_role] ) ) {
+      $roles = user_roles();
+      $account->roles[$suspended_role] = $roles[$suspended_role];
+      $account = module_invoke('user', 'save', $account);
+    }
+    elseif ( $is_inactive_member  &&  ! isset( $account->roles[$inactive_role] ) ) {
+      $roles = user_roles();
+      $account->roles[$inactive_role] = $roles[$inactive_role];
+      $account = module_invoke('user', 'save', $account);
+    }
+    elseif ( $is_cancelled_member  &&  ! isset( $account->roles[$cancelled_role] ) ) {
+      $roles = user_roles();
+      $account->roles[$cancelled_role] = $roles[$cancelled_role];
+      $account = module_invoke('user', 'save', $account);
+    }
+    else {
+        unset( $account->roles[$members_role] );
+        unset( $account->roles[$suspended_role] );
+        unset( $account->roles[$inactive_role] );
+        unset( $account->roles[$cancelled_role] );
+        $account = module_invoke('user', 'save', $account);
+    }
+  }
+}

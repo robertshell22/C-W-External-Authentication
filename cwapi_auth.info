@@ -1,0 +1,10 @@
+;$Id$
+
+name = Cambey & West Authentication
+description = Provides user authentication integration with the Cambey & West web service.
+core = 7.x
+package = Cambey & West
+
+files[] = cwapi_auth.module
+
+configure = admin/config/people/cwauth

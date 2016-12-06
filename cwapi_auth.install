@@ -1,0 +1,32 @@
+<?php
+
+/**
+ * @file
+ * cwapi_auth install file.
+ */
+ 
+ /**
+ * Implements hook_install().
+ *
+ * Inserts the cwapi_auth module's schema in the SQL database.
+ */
+function cwapi_auth_install() {
+   variable_set('cwapi_auth_non_member_msg', 'Your account information was not found. Please try again or click here to start a subscription.');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ *
+ * Remove the variables corresponding to the cwapi_auth module.
+ */
+function cwapi_auth_uninstall() {
+  variable_del('cwapi_auth_pub_acronym');
+  variable_del('cwapi_auth_client_id');
+  variable_del('cwapi_auth_client_pass');
+  variable_del('cwapi_auth_members_only');
+  variable_del('cwapi_auth_non_member_msg');
+  variable_del('cwapi_auth_members_role');
+  variable_del('cwapi_auth_suspended_role');
+  variable_del('cwapi_auth_inactive_role');
+  variable_del('cwapi_auth_cancelled_role');
+}
