@@ -1,6 +1,6 @@
 ;$Id$
 
-name = Cambey & West Authentication
+name = C&W External Authentication
 description = Provides user authentication integration with the Cambey & West web service.
 core = 7.x
 package = Cambey & West
