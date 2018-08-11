@@ -1,9 +1,9 @@
 ;$Id$
 
-name = C&W External Authentication
+name = Cambey & West External Authentication
 description = Provides user authentication integration with the Cambey & West web service.
 core = 7.x
-package = Cambey & West
+package = Authentication
 
 files[] = cwapi_auth.module
 
