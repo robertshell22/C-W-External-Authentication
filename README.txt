@@ -2,7 +2,7 @@ $Id
 
 -- SUMMARY --
 
-The Cambey & West Authentication module provides user authentication
+The Cambey & West External Authentication module provides user authentication
 integration with the Cambey & West web service.
 
 
